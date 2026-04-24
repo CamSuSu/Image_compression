@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Su Studio | 視覺無損背景壓縮引擎</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;800&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+    <style>
+        body { 
+            font-family: 'Inter', sans-serif; 
+            background-color: #f1f5f9;
+            background-image: radial-gradient(#cbd5e1 1px, transparent 1px);
+            background-size: 24px 24px;
+        }
+        .glass-panel { 
+            background: rgba(255, 255, 255, 0.85); 
+            backdrop-filter: blur(20px); 
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.6); 
+            box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.15), 0 0 0 1px rgba(15, 23, 42, 0.05);
+        }
+        .progress-transition { transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
+        .custom-scrollbar::-webkit-scrollbar { width: 8px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #0f172a; border-radius: 8px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 8px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #475569; }
+        .terminal-font { font-family: 'JetBrains Mono', monospace; }
+        
+        /* 拖曳區動畫 */
+        .drop-zone { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+        .drop-zone:hover { border-color: #6366f1; background-color: #eef2ff; transform: translateY(-2px); box-shadow: 0 10px 25px -5px rgba(99, 102, 241, 0.15); }
+        .drop-zone.dragover { border-color: #4f46e5; background-color: #e0e7ff; transform: scale(1.02); }
+        
+        /* 按鈕流光特效 */
+        .btn-glow { position: relative; overflow: hidden; }
+        .btn-glow::after {
+            content: ''; position: absolute;
+            top: -50%; left: -50%; width: 200%; height: 200%;
+            background: linear-gradient(to right, transparent, rgba(255,255,255,0.3), transparent);
+            transform: rotate(45deg) translateY(-100%);
+            animation: btnShine 3s infinite;
+        }
+        @keyframes btnShine {
+            0% { transform: rotate(45deg) translateY(-100%); }
+            20%, 100% { transform: rotate(45deg) translateY(100%); }
+        }
+        @keyframes progressStripes { from { background-position: 1rem 0; } to { background-position: 0 0; } }
+        .show-progress { opacity: 1 !important; transform: translateY(0) !important; }
+        
+        /* 成功狀態的按鈕動畫 */
+        @keyframes pulse-green {
+            0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+            70% { box-shadow: 0 0 0 15px rgba(16, 185, 129, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        }
+        .btn-ready { animation: pulse-green 2s infinite; }
+    </style>
+</head>
+<body class="min-h-screen p-4 md:p-8 text-slate-800 flex flex-col items-center justify-center">
+
+    <div class="w-full max-w-4xl glass-panel p-8 md:p-12 rounded-[2rem] relative overflow-hidden">
+        
+        <div class="absolute -top-32 -right-32 w-96 h-96 bg-indigo-400 rounded-full mix-blend-multiply filter blur-3xl opacity-20 pointer-events-none"></div>
+        <div class="absolute -bottom-32 -left-32 w-96 h-96 bg-blue-400 rounded-full mix-blend-multiply filter blur-3xl opacity-20 pointer-events-none"></div>
+
+        <div class="relative z-10 text-center mb-10">
+            <h1 class="text-4xl md:text-5xl font-extrabold mb-4 tracking-tight text-slate-900">
+                Su Studio <span class="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-blue-500">壓縮引擎</span>
+            </h1>
+            <p class="text-sm md:text-base text-slate-500 max-w-2xl mx-auto leading-relaxed">
+                搭載 <strong>Web Worker 背景運算技術</strong>。縮小視窗不卡頓、不中斷。<br>
+                壓縮完成後會保留進度，待您隨時切回視窗點擊儲存。
+            </p>
+        </div>
+
+        <div id="dropZone" class="drop-zone border-2 border-dashed border-slate-300 rounded-3xl p-12 text-center bg-white/50 relative cursor-pointer mb-8">
+            <input type="file" id="fileInput" multiple accept="image/png, image/jpeg, image/webp" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10">
+            <div class="text-indigo-500 pointer-events-none flex flex-col items-center">
+                <div class="w-20 h-20 bg-indigo-50 rounded-full flex items-center justify-center mb-4 shadow-sm">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-10 w-10 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                    </svg>
+                </div>
+                <span class="font-bold text-xl text-slate-700">點擊選擇，或將圖片拖曳至此</span>
+                <p class="text-sm mt-2 text-slate-400 font-medium">支援大量 PNG, JPG, WEBP 批次處理</p>
+            </div>
+        </div>
+
+        <div class="flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div class="flex items-center gap-3 px-5 py-3 bg-white rounded-2xl shadow-sm border border-slate-100 w-full sm:w-auto">
+                <div class="w-3 h-3 rounded-full bg-slate-300 transition-colors" id="statusDot"></div>
+                <span class="text-sm font-semibold text-slate-600">待處理：<span id="fileCount" class="text-indigo-600 text-lg ml-1">0</span> 張</span>
+            </div>
+            
+            <button id="startBtn" class="w-full sm:w-auto btn-glow bg-gradient-to-r from-indigo-600 to-blue-600 text-white px-10 py-4 rounded-2xl font-bold shadow-xl shadow-indigo-200 hover:shadow-indigo-300 hover:-translate-y-1 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:shadow-none transition-all duration-300" disabled>
+                啟動背景壓縮
+            </button>
+        </div>
+
+        <div id="progressArea" class="mt-10 hidden transition-all duration-500 opacity-0 transform translate-y-4">
+            <div class="flex justify-between items-end mb-3">
+                <div>
+                    <p id="statusText" class="font-bold text-indigo-700 text-sm mb-1">正在初始化背景執行緒...</p>
+                    <p id="currentFileText" class="text-xs text-slate-500 w-64 truncate">準備中</p>
+                </div>
+                <span id="percentageText" class="text-3xl font-extrabold text-slate-800 tracking-tighter">0%</span>
+            </div>
+            <div class="w-full bg-slate-200 rounded-full h-4 shadow-inner overflow-hidden p-0.5">
+                <div id="progressBar" class="bg-gradient-to-r from-indigo-500 to-blue-500 h-full rounded-full progress-transition w-0 shadow-sm relative">
+                    <div class="absolute inset-0 bg-white/20 w-full h-full" style="background-image: linear-gradient(45deg, rgba(255,255,255,.15) 25%, transparent 25%, transparent 50%, rgba(255,255,255,.15) 50%, rgba(255,255,255,.15) 75%, transparent 75%, transparent); background-size: 1rem 1rem; animation: progressStripes 1s linear infinite;"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="mt-8 bg-[#0f172a] p-1 rounded-2xl hidden shadow-2xl overflow-hidden ring-1 ring-white/10" id="logContainer">
+            <div class="flex items-center px-4 py-2 border-b border-slate-800 bg-slate-900/50">
+                <div class="flex gap-2">
+                    <div class="w-3 h-3 rounded-full bg-rose-500"></div>
+                    <div class="w-3 h-3 rounded-full bg-amber-500"></div>
+                    <div class="w-3 h-3 rounded-full bg-emerald-500"></div>
+                </div>
+                <span class="ml-4 text-xs font-medium text-slate-500 tracking-wider">SYSTEM LOG / WORKER THREAD</span>
+            </div>
+            <div class="p-5 h-60 overflow-y-auto text-[13px] terminal-font custom-scrollbar" id="logArea"></div>
+        </div>
+    </div>
+
+    <script>
+        const fileInput = document.getElementById('fileInput');
+        const dropZone = document.getElementById('dropZone');
+        const startBtn = document.getElementById('startBtn');
+        const fileCountTxt = document.getElementById('fileCount');
+        const statusDot = document.getElementById('statusDot');
+        const progressArea = document.getElementById('progressArea');
+        const progressBar = document.getElementById('progressBar');
+        const statusText = document.getElementById('statusText');
+        const currentFileText = document.getElementById('currentFileText');
+        const percentageText = document.getElementById('percentageText');
+        const logContainer = document.getElementById('logContainer');
+        const logArea = document.getElementById('logArea');
+
+        let selectedFiles = [];
+        let completedZipBlob = null; // 新增：用來存放完成的 ZIP 檔案
+
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => dropZone.addEventListener(eventName, e => { e.preventDefault(); e.stopPropagation(); }));
+        ['dragenter', 'dragover'].forEach(eventName => dropZone.addEventListener(eventName, () => dropZone.classList.add('dragover')));
+        ['dragleave', 'drop'].forEach(eventName => dropZone.addEventListener(eventName, () => dropZone.classList.remove('dragover')));
+        dropZone.addEventListener('drop', e => handleFiles(e.dataTransfer.files));
+        fileInput.addEventListener('change', e => handleFiles(e.target.files));
+
+        function handleFiles(files) {
+            selectedFiles = Array.from(files).filter(file => file.type.startsWith('image/'));
+            fileCountTxt.textContent = selectedFiles.length;
+            statusDot.className = selectedFiles.length > 0 ? "w-3 h-3 rounded-full bg-indigo-400 shadow-[0_0_8px_rgba(99,102,241,0.8)]" : "w-3 h-3 rounded-full bg-slate-300 transition-colors";
+            startBtn.disabled = selectedFiles.length === 0;
+            
+            // 每次重新選擇檔案時，重置系統狀態
+            resetSystemUI();
+        }
+
+        function log(msg, type = 'info') {
+            logContainer.classList.remove('hidden');
+            const div = document.createElement('div');
+            const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+            let color = 'text-emerald-400';
+            if (type === 'warning') color = 'text-amber-400';
+            if (type === 'error') color = 'text-rose-400';
+            if (type === 'system') color = 'text-sky-400';
+            
+            div.className = `mb-1.5 leading-relaxed ${color}`;
+            div.innerHTML = `<span class="text-slate-600 mr-3">[${time}]</span><span class="opacity-80">${msg}</span>`;
+            logArea.appendChild(div);
+            logArea.scrollTop = logArea.scrollHeight;
+        }
+
+        const workerCode = `
+            self.onmessage = async function(e) {
+                const { file, id } = e.data;
+                try {
+                    const bitmap = await createImageBitmap(file);
+                    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+                    const ctx = canvas.getContext('2d');
+                    ctx.imageSmoothingEnabled = true;
+                    ctx.imageSmoothingQuality = 'high';
+                    ctx.fillStyle = '#FFFFFF';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    ctx.drawImage(bitmap, 0, 0);
+
+                    const getBlob = (quality) => canvas.convertToBlob({ type: 'image/jpeg', quality: quality });
+
+                    const minQ = 0.40, maxQ = 0.95, targetKB = 12;
+                    const blobMax = await getBlob(maxQ);
+                    if (blobMax.size / 1024 <= targetKB) return self.postMessage({ id, blob: blobMax, success: true });
+
+                    const blobMin = await getBlob(minQ);
+                    const minKB = blobMin.size / 1024;
+                    if (minKB > targetKB) return self.postMessage({ id, blob: blobMin, success: true });
+
+                    let low = minQ, high = maxQ, bestBlob = blobMin, bestDiff = Math.abs(minKB - targetKB);
+                    for (let i = 0; i < 7; i++) { 
+                        let mid = (low + high) / 2;
+                        let blob = await getBlob(mid);
+                        let kb = blob.size / 1024;
+                        let diff = Math.abs(kb - targetKB);
+                        if (kb <= targetKB + 2 && diff < bestDiff) { bestDiff = diff; bestBlob = blob; }
+                        if (kb > targetKB) high = mid; else low = mid;
+                    }
+                    self.postMessage({ id, blob: bestBlob, success: true });
+                } catch (error) { self.postMessage({ id, error: error.message, success: false }); }
+            };
+        `;
+        const blob = new Blob([workerCode], { type: 'application/javascript' });
+        const workerUrl = URL.createObjectURL(blob);
+
+        function resetSystemUI() {
+            completedZipBlob = null;
+            logContainer.classList.add('hidden');
+            logArea.innerHTML = '';
+            progressArea.classList.remove('show-progress');
+            progressArea.classList.add('hidden');
+            
+            // 恢復按鈕預設狀態
+            startBtn.textContent = "啟動背景壓縮";
+            startBtn.classList.remove('from-emerald-500', 'to-teal-500', 'btn-ready', 'shadow-emerald-300');
+            startBtn.classList.add('from-indigo-600', 'to-blue-600', 'shadow-indigo-200');
+        }
+
+        startBtn.addEventListener('click', async () => {
+            // 【關鍵修改】：如果已經壓縮完畢 (存在 completedZipBlob)，代表這次點擊是為了「存檔」
+            if (completedZipBlob) {
+                await executeSave(completedZipBlob);
+                return;
+            }
+
+            if (selectedFiles.length === 0) return;
+
+            // 狀態變更為：壓縮中
+            startBtn.disabled = true;
+            fileInput.disabled = true;
+            dropZone.classList.add('pointer-events-none', 'opacity-60');
+            progressArea.classList.remove('hidden');
+            setTimeout(() => progressArea.classList.add('show-progress'), 10);
+            
+            const zip = new JSZip();
+            const total = selectedFiles.length;
+            
+            log(`🚀 啟動背景運算引擎，可安心縮小視窗或切換分頁...`, 'system');
+            
+            const worker = new Worker(workerUrl);
+            const compressWithWorker = (file, index) => new Promise((resolve) => {
+                const handleMessage = (e) => {
+                    if (e.data.id === index) { worker.removeEventListener('message', handleMessage); resolve(e.data); }
+                };
+                worker.addEventListener('message', handleMessage);
+                worker.postMessage({ file, id: index });
+            });
+
+            for (let i = 0; i < total; i++) {
+                const file = selectedFiles[i];
+                statusText.textContent = `背景運算中 (${i+1}/${total})`;
+                currentFileText.textContent = file.name;
+                
+                const result = await compressWithWorker(file, i);
+                if(result.success) {
+                    const newFileName = `${file.name.replace(/\.[^/.]+$/, "")}.jpg`;
+                    zip.file(newFileName, result.blob);
+                    log(`✅ ${newFileName} 處理完成`);
+                } else {
+                    log(`❌ ${file.name} 失敗: ${result.error}`, 'error');
+                }
+
+                const percent = Math.round(((i + 1) / total) * 100);
+                progressBar.style.width = `${percent}%`;
+                percentageText.textContent = `${percent}%`;
+            }
+
+            worker.terminate();
+
+            statusText.textContent = "📦 正在封裝 ZIP 檔...";
+            currentFileText.textContent = "最後處理階段...";
+            
+            // 壓縮完成，將結果存入全域變數
+            completedZipBlob = await zip.generateAsync({ type: "blob" });
+
+            // 【關鍵修改】：改變 UI 狀態，提示使用者點擊按鈕來存檔
+            statusText.textContent = "✨ 壓縮處理完畢！";
+            currentFileText.textContent = "等待您決定儲存位置";
+            statusDot.className = "w-3 h-3 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]";
+            
+            startBtn.textContent = "💾 點擊選擇儲存位置";
+            startBtn.classList.remove('from-indigo-600', 'to-blue-600', 'shadow-indigo-200');
+            startBtn.classList.add('from-emerald-500', 'to-teal-500', 'shadow-emerald-300', 'btn-ready');
+            startBtn.disabled = false; // 解除鎖定，讓使用者點擊
+
+            log(`📦 所有圖片處理完畢！`, 'system');
+            log(`💡 為配合瀏覽器安全機制，請點擊上方的「點擊選擇儲存位置」按鈕來進行存檔。`, 'warning');
+        });
+
+        // 執行存檔動作的獨立函數
+        async function executeSave(blob) {
+            const defaultFileName = `SuStudio_Optimized_${new Date().getTime()}.zip`;
+            
+            try {
+                if (window.showSaveFilePicker) {
+                    const handle = await window.showSaveFilePicker({
+                        suggestedName: defaultFileName,
+                        types: [{ description: 'ZIP 壓縮檔', accept: { 'application/zip': ['.zip'] } }],
+                    });
+                    const writable = await handle.createWritable();
+                    await writable.write(blob);
+                    await writable.close();
+                    
+                    statusText.textContent = "🎉 檔案已成功儲存！";
+                    currentFileText.textContent = "任務圓滿結束";
+                    log("🎉 檔案已成功儲存到您指定的資料夾！", "success");
+                } else {
+                    throw new Error("API Not Supported");
+                }
+            } catch (err) {
+                if (err.name !== 'AbortError') {
+                    const downloadUrl = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = downloadUrl;
+                    a.download = defaultFileName;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(downloadUrl);
+                    log("已透過傳統方式下載檔案", "system");
+                } else {
+                    log("✋ 您取消了存檔動作，可再次點擊按鈕重新選擇。", "warning");
+                    return; // 取消的話就不用重置，讓他可以再點一次
+                }
+            }
+
+            // 存檔成功後，重置系統以便進行下一批處理
+            setTimeout(() => {
+                fileInput.value = '';
+                selectedFiles = [];
+                fileCountTxt.textContent = "0";
+                dropZone.classList.remove('pointer-events-none', 'opacity-60');
+                statusDot.className = "w-3 h-3 rounded-full bg-slate-300";
+                resetSystemUI();
+                log("🔄 系統已重置，隨時可進行下一批壓縮。", "system");
+            }, 1500);
+        }
+    </script>
+</body>
+</html>
