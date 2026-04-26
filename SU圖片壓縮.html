@@ -67,11 +67,11 @@
 
         <div class="relative z-10 text-center mb-10">
             <h1 class="text-4xl md:text-5xl font-extrabold mb-4 tracking-tight text-slate-900">
-                Su Studio <span class="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-blue-500">壓縮引擎</span>
+                Su Studio <span class="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-blue-500">極限壓縮引擎</span>
             </h1>
             <p class="text-sm md:text-base text-slate-500 max-w-2xl mx-auto leading-relaxed">
-                搭載 <strong>Web Worker 背景運算技術</strong>。縮小視窗不卡頓、不中斷。<br>
-                壓縮完成後會保留進度，待您隨時切回視窗點擊儲存。
+                搭載 <strong>動態無損畫質演算法</strong>。在肉眼無法分辨差異的前提下，挑戰體積極限。<br>
+                可自由選擇「維持原圖格式」或「強制轉為高壓縮比 WebP」。
             </p>
         </div>
 
@@ -88,15 +88,26 @@
             </div>
         </div>
 
-        <div class="flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div class="flex items-center gap-3 px-5 py-3 bg-white rounded-2xl shadow-sm border border-slate-100 w-full sm:w-auto">
+        <div class="flex flex-col lg:flex-row items-center justify-between gap-4">
+            <div class="flex items-center gap-3 px-5 py-3 bg-white rounded-2xl shadow-sm border border-slate-100 w-full lg:w-auto">
                 <div class="w-3 h-3 rounded-full bg-slate-300 transition-colors" id="statusDot"></div>
-                <span class="text-sm font-semibold text-slate-600">待處理：<span id="fileCount" class="text-indigo-600 text-lg ml-1">0</span> 張</span>
+                <span class="text-sm font-semibold text-slate-600 whitespace-nowrap">待處理：<span id="fileCount" class="text-indigo-600 text-lg ml-1">0</span> 張</span>
             </div>
             
-            <button id="startBtn" class="w-full sm:w-auto btn-glow bg-gradient-to-r from-indigo-600 to-blue-600 text-white px-10 py-4 rounded-2xl font-bold shadow-xl shadow-indigo-200 hover:shadow-indigo-300 hover:-translate-y-1 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:shadow-none transition-all duration-300" disabled>
-                啟動背景壓縮
-            </button>
+            <div id="actionButtons" class="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
+                <button id="standardBtn" class="w-full sm:w-auto bg-white text-indigo-600 border border-indigo-200 px-6 py-3.5 rounded-2xl font-bold shadow-sm hover:bg-indigo-50 hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:bg-white transition-all duration-300" disabled>
+                    維持原格式壓縮
+                </button>
+                <button id="webpBtn" class="w-full sm:w-auto btn-glow bg-gradient-to-r from-violet-600 to-indigo-600 text-white px-6 py-3.5 rounded-2xl font-bold shadow-xl shadow-indigo-200 hover:shadow-indigo-300 hover:-translate-y-1 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:shadow-none transition-all duration-300" disabled>
+                    轉 WEBP 極限壓縮
+                </button>
+            </div>
+
+            <div id="saveButtonContainer" class="hidden w-full lg:w-auto">
+                <button id="saveBtn" class="w-full btn-ready bg-gradient-to-r from-emerald-500 to-teal-500 text-white px-10 py-3.5 rounded-2xl font-bold shadow-xl shadow-emerald-300 hover:-translate-y-1 transition-all duration-300">
+                    💾 點擊選擇儲存位置
+                </button>
+            </div>
         </div>
 
         <div id="progressArea" class="mt-10 hidden transition-all duration-500 opacity-0 transform translate-y-4">
@@ -130,7 +141,11 @@
     <script>
         const fileInput = document.getElementById('fileInput');
         const dropZone = document.getElementById('dropZone');
-        const startBtn = document.getElementById('startBtn');
+        const standardBtn = document.getElementById('standardBtn');
+        const webpBtn = document.getElementById('webpBtn');
+        const saveBtn = document.getElementById('saveBtn');
+        const actionButtons = document.getElementById('actionButtons');
+        const saveButtonContainer = document.getElementById('saveButtonContainer');
         const fileCountTxt = document.getElementById('fileCount');
         const statusDot = document.getElementById('statusDot');
         const progressArea = document.getElementById('progressArea');
@@ -142,7 +157,7 @@
         const logArea = document.getElementById('logArea');
 
         let selectedFiles = [];
-        let completedZipBlob = null; // 新增：用來存放完成的 ZIP 檔案
+        let completedZipBlob = null; 
 
         ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => dropZone.addEventListener(eventName, e => { e.preventDefault(); e.stopPropagation(); }));
         ['dragenter', 'dragover'].forEach(eventName => dropZone.addEventListener(eventName, () => dropZone.classList.add('dragover')));
@@ -154,9 +169,11 @@
             selectedFiles = Array.from(files).filter(file => file.type.startsWith('image/'));
             fileCountTxt.textContent = selectedFiles.length;
             statusDot.className = selectedFiles.length > 0 ? "w-3 h-3 rounded-full bg-indigo-400 shadow-[0_0_8px_rgba(99,102,241,0.8)]" : "w-3 h-3 rounded-full bg-slate-300 transition-colors";
-            startBtn.disabled = selectedFiles.length === 0;
             
-            // 每次重新選擇檔案時，重置系統狀態
+            const hasFiles = selectedFiles.length > 0;
+            standardBtn.disabled = !hasFiles;
+            webpBtn.disabled = !hasFiles;
+            
             resetSystemUI();
         }
 
@@ -175,39 +192,87 @@
             logArea.scrollTop = logArea.scrollHeight;
         }
 
+        // 雙模式 Web Worker 核心邏輯
         const workerCode = `
             self.onmessage = async function(e) {
-                const { file, id } = e.data;
+                const { file, id, fileType, originalSize, fileName, compressMode } = e.data;
                 try {
                     const bitmap = await createImageBitmap(file);
                     const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
                     const ctx = canvas.getContext('2d');
                     ctx.imageSmoothingEnabled = true;
                     ctx.imageSmoothingQuality = 'high';
-                    ctx.fillStyle = '#FFFFFF';
-                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    
+                    let targetType = fileType;
+                    let finalName = fileName;
+
+                    // 如果選擇 WEBP 模式，將所有格式轉為 webp
+                    if (compressMode === 'webp') {
+                        targetType = 'image/webp';
+                        finalName = fileName.replace(/\\.[^/.]+$/, ".webp");
+                    } else {
+                        // 否則維持原格式，但針對 JPG 填補白底避免透明通道變黑
+                        if (fileType === 'image/jpeg') {
+                            ctx.fillStyle = '#FFFFFF';
+                            ctx.fillRect(0, 0, canvas.width, canvas.height);
+                        }
+                    }
+                    
                     ctx.drawImage(bitmap, 0, 0);
 
-                    const getBlob = (quality) => canvas.convertToBlob({ type: 'image/jpeg', quality: quality });
+                    const getBlob = (quality) => canvas.convertToBlob({ type: targetType, quality: quality });
 
-                    const minQ = 0.40, maxQ = 0.95, targetKB = 12;
+                    // 如果是 PNG 且處於原格式模式，無法透過 quality 有損壓縮，只做重置編碼
+                    if (targetType === 'image/png') {
+                        let blob = await getBlob(1);
+                        // 防呆：如果重編碼反而變大，退回原始檔
+                        if (blob.size >= originalSize) {
+                            return self.postMessage({ id, blob: file, finalName, success: true });
+                        }
+                        return self.postMessage({ id, blob: blob, finalName, success: true });
+                    }
+
+                    // JPG / WEBP 壓縮核心 (目標 10KB，畫質底線 0.65)
+                    const targetKB = 10; 
+                    const minQ = 0.65, maxQ = 0.95;
+                    
                     const blobMax = await getBlob(maxQ);
-                    if (blobMax.size / 1024 <= targetKB) return self.postMessage({ id, blob: blobMax, success: true });
+                    if (blobMax.size / 1024 <= targetKB) {
+                        return self.postMessage({ id, blob: blobMax, finalName, success: true });
+                    }
 
                     const blobMin = await getBlob(minQ);
                     const minKB = blobMin.size / 1024;
-                    if (minKB > targetKB) return self.postMessage({ id, blob: blobMin, success: true });
+                    
+                    // 如果極限畫質(0.65)還是大於 10KB，停止強壓以保護畫質
+                    if (minKB > targetKB) {
+                        let resultBlob = blobMin.size < originalSize ? blobMin : file;
+                        let resultName = resultBlob === file ? fileName : finalName;
+                        return self.postMessage({ id, blob: resultBlob, finalName: resultName, success: true });
+                    }
 
+                    // 二元搜尋最佳體積
                     let low = minQ, high = maxQ, bestBlob = blobMin, bestDiff = Math.abs(minKB - targetKB);
                     for (let i = 0; i < 7; i++) { 
                         let mid = (low + high) / 2;
                         let blob = await getBlob(mid);
                         let kb = blob.size / 1024;
                         let diff = Math.abs(kb - targetKB);
-                        if (kb <= targetKB + 2 && diff < bestDiff) { bestDiff = diff; bestBlob = blob; }
+                        
+                        if (kb <= targetKB + 2 && diff < bestDiff) { 
+                            bestDiff = diff; 
+                            bestBlob = blob; 
+                        }
                         if (kb > targetKB) high = mid; else low = mid;
                     }
-                    self.postMessage({ id, blob: bestBlob, success: true });
+                    
+                    // 最終防線：壓完比原本大則退回
+                    if (bestBlob.size >= originalSize) {
+                        bestBlob = file;
+                        finalName = fileName;
+                    }
+
+                    self.postMessage({ id, blob: bestBlob, finalName, success: true });
                 } catch (error) { self.postMessage({ id, error: error.message, success: false }); }
             };
         `;
@@ -221,32 +286,30 @@
             progressArea.classList.remove('show-progress');
             progressArea.classList.add('hidden');
             
-            // 恢復按鈕預設狀態
-            startBtn.textContent = "啟動背景壓縮";
-            startBtn.classList.remove('from-emerald-500', 'to-teal-500', 'btn-ready', 'shadow-emerald-300');
-            startBtn.classList.add('from-indigo-600', 'to-blue-600', 'shadow-indigo-200');
+            actionButtons.classList.remove('hidden');
+            actionButtons.classList.add('flex');
+            saveButtonContainer.classList.add('hidden');
         }
 
-        startBtn.addEventListener('click', async () => {
-            // 【關鍵修改】：如果已經壓縮完畢 (存在 completedZipBlob)，代表這次點擊是為了「存檔」
-            if (completedZipBlob) {
-                await executeSave(completedZipBlob);
-                return;
-            }
-
+        async function startCompression(mode) {
             if (selectedFiles.length === 0) return;
 
-            // 狀態變更為：壓縮中
-            startBtn.disabled = true;
+            standardBtn.disabled = true;
+            webpBtn.disabled = true;
             fileInput.disabled = true;
             dropZone.classList.add('pointer-events-none', 'opacity-60');
+            
+            actionButtons.classList.remove('flex');
+            actionButtons.classList.add('hidden');
+            
             progressArea.classList.remove('hidden');
             setTimeout(() => progressArea.classList.add('show-progress'), 10);
             
             const zip = new JSZip();
             const total = selectedFiles.length;
             
-            log(`🚀 啟動背景運算引擎，可安心縮小視窗或切換分頁...`, 'system');
+            const modeText = mode === 'webp' ? 'WEBP 轉換與極限壓縮' : '原格式保留壓縮';
+            log(`🚀 啟動引擎：${modeText}，目標鎖定 10KB...`, 'system');
             
             const worker = new Worker(workerUrl);
             const compressWithWorker = (file, index) => new Promise((resolve) => {
@@ -254,19 +317,32 @@
                     if (e.data.id === index) { worker.removeEventListener('message', handleMessage); resolve(e.data); }
                 };
                 worker.addEventListener('message', handleMessage);
-                worker.postMessage({ file, id: index });
+                worker.postMessage({ 
+                    file, 
+                    id: index, 
+                    fileType: file.type, 
+                    originalSize: file.size, 
+                    fileName: file.name,
+                    compressMode: mode 
+                });
             });
 
             for (let i = 0; i < total; i++) {
                 const file = selectedFiles[i];
-                statusText.textContent = `背景運算中 (${i+1}/${total})`;
+                statusText.textContent = `動態演算中 (${i+1}/${total})`;
                 currentFileText.textContent = file.name;
                 
                 const result = await compressWithWorker(file, i);
                 if(result.success) {
-                    const newFileName = `${file.name.replace(/\.[^/.]+$/, "")}.jpg`;
-                    zip.file(newFileName, result.blob);
-                    log(`✅ ${newFileName} 處理完成`);
+                    zip.file(result.finalName, result.blob);
+                    
+                    const originalKB = (file.size / 1024).toFixed(1);
+                    const finalKB = (result.blob.size / 1024).toFixed(1);
+                    const savedRatio = Math.round((1 - (result.blob.size / file.size)) * 100);
+                    
+                    let logMsg = `✅ ${result.finalName} [${originalKB}KB ➜ ${finalKB}KB]`;
+                    if (savedRatio > 0) logMsg += ` 節省 ${savedRatio}%`;
+                    log(logMsg);
                 } else {
                     log(`❌ ${file.name} 失敗: ${result.error}`, 'error');
                 }
@@ -281,24 +357,20 @@
             statusText.textContent = "📦 正在封裝 ZIP 檔...";
             currentFileText.textContent = "最後處理階段...";
             
-            // 壓縮完成，將結果存入全域變數
             completedZipBlob = await zip.generateAsync({ type: "blob" });
 
-            // 【關鍵修改】：改變 UI 狀態，提示使用者點擊按鈕來存檔
             statusText.textContent = "✨ 壓縮處理完畢！";
             currentFileText.textContent = "等待您決定儲存位置";
             statusDot.className = "w-3 h-3 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]";
             
-            startBtn.textContent = "💾 點擊選擇儲存位置";
-            startBtn.classList.remove('from-indigo-600', 'to-blue-600', 'shadow-indigo-200');
-            startBtn.classList.add('from-emerald-500', 'to-teal-500', 'shadow-emerald-300', 'btn-ready');
-            startBtn.disabled = false; // 解除鎖定，讓使用者點擊
+            saveButtonContainer.classList.remove('hidden');
+            log(`📦 所有圖片處理完畢！請點擊儲存按鈕下載檔案。`, 'system');
+        }
 
-            log(`📦 所有圖片處理完畢！`, 'system');
-            log(`💡 為配合瀏覽器安全機制，請點擊上方的「點擊選擇儲存位置」按鈕來進行存檔。`, 'warning');
-        });
+        standardBtn.addEventListener('click', () => startCompression('standard'));
+        webpBtn.addEventListener('click', () => startCompression('webp'));
+        saveBtn.addEventListener('click', () => executeSave(completedZipBlob));
 
-        // 執行存檔動作的獨立函數
         async function executeSave(blob) {
             const defaultFileName = `SuStudio_Optimized_${new Date().getTime()}.zip`;
             
@@ -331,19 +403,23 @@
                     log("已透過傳統方式下載檔案", "system");
                 } else {
                     log("✋ 您取消了存檔動作，可再次點擊按鈕重新選擇。", "warning");
-                    return; // 取消的話就不用重置，讓他可以再點一次
+                    return; 
                 }
             }
 
-            // 存檔成功後，重置系統以便進行下一批處理
             setTimeout(() => {
-                fileInput.value = '';
+                fileInput.value = ''; 
+                fileInput.disabled = false; 
                 selectedFiles = [];
                 fileCountTxt.textContent = "0";
                 dropZone.classList.remove('pointer-events-none', 'opacity-60');
                 statusDot.className = "w-3 h-3 rounded-full bg-slate-300";
-                resetSystemUI();
-                log("🔄 系統已重置，隨時可進行下一批壓縮。", "system");
+                
+                resetSystemUI(); 
+                standardBtn.disabled = true; 
+                webpBtn.disabled = true;
+                
+                log("🔄 系統已完整重置，隨時可進行下一批壓縮。", "system");
             }, 1500);
         }
     </script>
